@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Dashboard | SQL Injection Monitor</title>
+  <link rel="stylesheet" href="css/style.css">
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+  <header>
+    <h1>SQL Injection Attacks Dashboard</h1>
+    <button id="logoutBtn">Logout</button>
+  </header>
+
+  <main>
+    <div class="stats-container">
+      <div class="stat-card">
+        <h3>Total Attacks</h3>
+        <p id="totalAttacks">0</p>
+      </div>
+      <div class="stat-card">
+        <h3>High Severity</h3>
+        <p id="highSeverity">0</p>
+      </div>
+    </div>
+
+    <div class="scan-controls">
+      <h2>Scan a Website</h2>
+      <input type="text" id="websiteUrl" placeholder="https://example.com">
+      <button id="scanBtn">Scan for SQLi</button>
+    </div>
+
+    <div class="chart-container">
+      <canvas id="attackChart"></canvas>
+    </div>
+
+    <div class="recent-attacks">
+      <h2>Recent Attacks</h2>
+      <table id="attacksTable">
+        <thead>
+          <tr>
+            <th>Time</th>
+            <th>IP Address</th>
+            <th>Payload</th>
+            <th>Severity</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </main>
+
+  <script src="js/supabase.js"></script>
+  <script src="js/dashboard.js"></script>
+  <script>
+    // === CONFIGURE YOUR BACKEND URL HERE ===
+    // If running locally, use http://localhost:5000
+    // If using Go Live, make sure backend is accessible from your browser
+    const BACKEND_URL = 'http://localhost:5000';
+
+    const scanBtn = document.getElementById('scanBtn');
+    const websiteUrl = document.getElementById('websiteUrl');
+    const totalAttacks = document.getElementById('totalAttacks');
+    const highSeverity = document.getElementById('highSeverity');
+    const attacksTable = document.getElementById('attacksTable').querySelector('tbody');
+    let attackChart;
+
+    scanBtn.addEventListener('click', async () => {
+      const url = websiteUrl.value.trim();
+      if (!url) {
+        alert('Please enter a website URL.');
+        return;
+      }
+      scanBtn.disabled = true;
+      scanBtn.textContent = 'Scanning...';
+      try {
+        const res = await fetch(`${BACKEND_URL}/scan?website=${encodeURIComponent(url)}`);
+        const data = await res.json();
+        if (data.error) {
+          alert('Error: ' + data.error);
+        } else {
+          renderAttacks(data.attacks);
+        }
+      } catch (e) {
+        alert('Could not connect to backend.\n\nMake sure your backend is running at ' + BACKEND_URL + '\n\nError: ' + e);
+      }
+      scanBtn.disabled = false;
+      scanBtn.textContent = 'Scan for SQLi';
+    });
+
+    function renderAttacks(attacks) {
+      totalAttacks.textContent = attacks.length;
+      highSeverity.textContent = attacks.filter(a => a.severity === 'High').length;
+      attacksTable.innerHTML = '';
+      attacks.forEach(a => {
+        const row = document.createElement('tr');
+        row.innerHTML = `
+          <td>${a.timestamp}</td>
+          <td>${a.ip || '-'}</td>
+          <td>${a.payload}</td>
+          <td>${a.severity || '-'}</td>
+        `;
+        attacksTable.appendChild(row);
+      });
+      renderChart(attacks);
+    }
+
+    function renderChart(attacks) {
+      const ctx = document.getElementById('attackChart').getContext('2d');
+      const high = attacks.filter(a => a.severity === 'High').length;
+      const medium = attacks.filter(a => a.severity === 'Medium').length;
+      const low = attacks.filter(a => a.severity === 'Low').length;
+      if (attackChart) attackChart.destroy();
+      attackChart = new Chart(ctx, {
+        type: 'doughnut',
+        data: {
+          labels: ['High', 'Medium', 'Low'],
+          datasets: [{
+            data: [high, medium, low],
+            backgroundColor: ['#e74c3c', '#f1c40f', '#3498db']
+          }]
+        },
+        options: {
+          plugins: {
+            legend: { display: true }
+          }
+        }
+      });
+    }
+  </script>
+</body>
+</html>
