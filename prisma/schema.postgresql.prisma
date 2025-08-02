@@ -1,0 +1,443 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ========================================
+// USER MANAGEMENT & AUTHENTICATION
+// ========================================
+
+model User {
+  id                String   @id @default(cuid())
+  email             String   @unique
+  emailVerified     Boolean  @default(false)
+  emailVerificationCode String?
+  emailVerificationExpires DateTime?
+  password          String
+  role              UserRole @default(CITIZEN)
+  profile           UserProfile?
+  
+  // Audit fields
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  lastLoginAt       DateTime?
+  
+  // Relations
+  reportedIssues    Issue[]    @relation("ReportedByUser")
+  assignedIssues    Issue[]    @relation("AssignedToUser")
+  comments          Comment[]
+  votes             Vote[]
+  notifications     Notification[]
+  sessions          Session[]
+  activityLogs      ActivityLog[]
+  analytics         UserAnalytics?
+  
+  @@map("users")
+}
+
+model UserProfile {
+  id           String @id @default(cuid())
+  userId       String @unique
+  user         User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  firstName    String?
+  lastName     String?
+  phone        String?
+  address      String?
+  city         String?
+  state        String?
+  zipCode      String?
+  avatar       String?
+  bio          String?
+  
+  // Preferences
+  emailNotifications    Boolean @default(true)
+  smsNotifications      Boolean @default(false)
+  pushNotifications     Boolean @default(true)
+  marketingEmails       Boolean @default(false)
+  
+  // Location preferences
+  defaultLatitude       Float?
+  defaultLongitude      Float?
+  searchRadius          Int?    @default(5) // miles
+  
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  
+  @@map("user_profiles")
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  token     String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  
+  @@map("sessions")
+}
+
+// ========================================
+// ISSUE MANAGEMENT
+// ========================================
+
+model Issue {
+  id              String      @id @default(cuid())
+  title           String
+  description     String
+  category        IssueCategory
+  priority        IssuePriority @default(MEDIUM)
+  status          IssueStatus   @default(OPEN)
+  
+  // Location
+  latitude        Float
+  longitude       Float
+  address         String?
+  landmark        String?
+  
+  // Media
+  images          String[]
+  videos          String[]
+  attachments     String[]
+  
+  // Assignment
+  reportedById    String
+  reportedBy      User        @relation("ReportedByUser", fields: [reportedById], references: [id])
+  assignedToId    String?
+  assignedTo      User?       @relation("AssignedToUser", fields: [assignedToId], references: [id])
+  departmentId    String?
+  department      Department? @relation(fields: [departmentId], references: [id])
+  
+  // Tracking
+  trackingNumber  String      @unique @default(cuid())
+  estimatedResolutionDate DateTime?
+  actualResolutionDate    DateTime?
+  resolutionNotes         String?
+  
+  // Engagement
+  upvotes         Int         @default(0)
+  downvotes       Int         @default(0)
+  viewCount       Int         @default(0)
+  
+  // Audit
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+  resolvedAt      DateTime?
+  
+  // Relations
+  comments        Comment[]
+  votes           Vote[]
+  statusHistory   IssueStatusHistory[]
+  notifications   Notification[]
+  activityLogs    ActivityLog[]
+  
+  @@map("issues")
+}
+
+model Comment {
+  id        String   @id @default(cuid())
+  content   String
+  issueId   String
+  issue     Issue    @relation(fields: [issueId], references: [id], onDelete: Cascade)
+  authorId  String
+  author    User     @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  parentId  String?
+  parent    Comment? @relation("CommentReplies", fields: [parentId], references: [id])
+  replies   Comment[] @relation("CommentReplies")
+  
+  // Moderation
+  isOfficial Boolean  @default(false)
+  isPinned   Boolean  @default(false)
+  isHidden   Boolean  @default(false)
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  @@map("comments")
+}
+
+model Vote {
+  id       String   @id @default(cuid())
+  type     VoteType
+  issueId  String
+  issue    Issue    @relation(fields: [issueId], references: [id], onDelete: Cascade)
+  userId   String
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  createdAt DateTime @default(now())
+  
+  @@unique([issueId, userId])
+  @@map("votes")
+}
+
+model IssueStatusHistory {
+  id           String      @id @default(cuid())
+  issueId      String
+  issue        Issue       @relation(fields: [issueId], references: [id], onDelete: Cascade)
+  fromStatus   IssueStatus?
+  toStatus     IssueStatus
+  changedById  String?
+  reason       String?
+  notes        String?
+  
+  createdAt    DateTime    @default(now())
+  
+  @@map("issue_status_history")
+}
+
+// ========================================
+// DEPARTMENT & ORGANIZATION
+// ========================================
+
+model Department {
+  id            String @id @default(cuid())
+  name          String @unique
+  description   String?
+  code          String @unique // e.g., "PWD" for Public Works Department
+  
+  // Contact Information
+  email         String?
+  phone         String?
+  address       String?
+  website       String?
+  
+  // Management
+  headId        String?
+  head          User?   @relation("DepartmentHead", fields: [headId], references: [id])
+  
+  // Settings
+  isActive      Boolean @default(true)
+  autoAssign    Boolean @default(false)
+  slaHours      Int?    @default(72) // Service Level Agreement in hours
+  
+  // Audit
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  
+  // Relations
+  issues        Issue[]
+  staff         DepartmentStaff[]
+  notifications Notification[]
+  
+  @@map("departments")
+}
+
+model DepartmentStaff {
+  id           String     @id @default(cuid())
+  departmentId String
+  department   Department @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+  userId       String
+  user         User       @relation("DepartmentStaff", fields: [userId], references: [id], onDelete: Cascade)
+  role         StaffRole  @default(MEMBER)
+  
+  isActive     Boolean    @default(true)
+  joinedAt     DateTime   @default(now())
+  leftAt       DateTime?
+  
+  @@unique([departmentId, userId])
+  @@map("department_staff")
+}
+
+// ========================================
+// NOTIFICATIONS & COMMUNICATIONS
+// ========================================
+
+model Notification {
+  id           String           @id @default(cuid())
+  title        String
+  message      String
+  type         NotificationType
+  priority     NotificationPriority @default(NORMAL)
+  
+  // Recipients
+  userId       String?
+  user         User?            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  departmentId String?
+  department   Department?      @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+  
+  // Related entities
+  issueId      String?
+  issue        Issue?           @relation(fields: [issueId], references: [id], onDelete: Cascade)
+  
+  // Status
+  isRead       Boolean          @default(false)
+  readAt       DateTime?
+  
+  // Delivery
+  channels     NotificationChannel[]
+  sentAt       DateTime?
+  deliveredAt  DateTime?
+  
+  createdAt    DateTime         @default(now())
+  
+  @@map("notifications")
+}
+
+// ========================================
+// ANALYTICS & REPORTING
+// ========================================
+
+model Analytics {
+  id            String   @id @default(cuid())
+  metric        String   // e.g., "issues_created", "users_registered"
+  value         Float
+  dimension1    String?  // e.g., category, department
+  dimension2    String?  // e.g., priority, status
+  
+  date          DateTime @default(now())
+  createdAt     DateTime @default(now())
+  
+  @@map("analytics")
+}
+
+model UserAnalytics {
+  id                  String   @id @default(cuid())
+  userId              String   @unique
+  user                User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  // Engagement metrics
+  issuesReported      Int      @default(0)
+  commentsPosted      Int      @default(0)
+  votesGiven          Int      @default(0)
+  
+  // Activity metrics
+  loginCount          Int      @default(0)
+  lastActiveAt        DateTime?
+  totalTimeSpent      Int      @default(0) // in minutes
+  
+  // Reputation
+  reputationScore     Int      @default(0)
+  badgesEarned        String[] // Array of badge IDs
+  
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+  
+  @@map("user_analytics")
+}
+
+model ActivityLog {
+  id          String           @id @default(cuid())
+  action      String           // e.g., "ISSUE_CREATED", "STATUS_CHANGED"
+  entity      String           // e.g., "Issue", "User"
+  entityId    String
+  
+  userId      String?
+  user        User?            @relation(fields: [userId], references: [id], onDelete: SetNull)
+  issueId     String?
+  issue       Issue?           @relation(fields: [issueId], references: [id], onDelete: SetNull)
+  
+  metadata    Json?            // Additional data
+  ipAddress   String?
+  userAgent   String?
+  
+  createdAt   DateTime         @default(now())
+  
+  @@map("activity_logs")
+}
+
+// ========================================
+// SYSTEM CONFIGURATION
+// ========================================
+
+model SystemConfig {
+  id          String   @id @default(cuid())
+  key         String   @unique
+  value       String
+  description String?
+  category    String?  // e.g., "email", "maps", "general"
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  @@map("system_config")
+}
+
+// ========================================
+// ENUMS
+// ========================================
+
+enum UserRole {
+  ADMIN
+  OFFICIAL
+  WORKER
+  CITIZEN
+}
+
+enum IssueCategory {
+  ROADS
+  WATER
+  GARBAGE
+  LIGHTING
+  SAFETY
+  TRAFFIC
+  PARKS
+  NOISE
+  GRAFFITI
+  OBSTRUCTIONS
+  OTHER
+}
+
+enum IssuePriority {
+  CRITICAL
+  URGENT
+  HIGH
+  MEDIUM
+  LOW
+}
+
+enum IssueStatus {
+  OPEN
+  ACKNOWLEDGED
+  UNDER_REVIEW
+  IN_PROGRESS
+  ESCALATED
+  RESOLVED
+  CLOSED
+  DUPLICATE
+  INVALID
+}
+
+enum VoteType {
+  UPVOTE
+  DOWNVOTE
+}
+
+enum StaffRole {
+  HEAD
+  SUPERVISOR
+  WORKER
+  MEMBER
+}
+
+enum NotificationType {
+  ISSUE_CREATED
+  ISSUE_UPDATED
+  ISSUE_ASSIGNED
+  ISSUE_RESOLVED
+  COMMENT_ADDED
+  VOTE_RECEIVED
+  SYSTEM_ALERT
+  REMINDER
+}
+
+enum NotificationPriority {
+  URGENT
+  HIGH
+  NORMAL
+  LOW
+}
+
+enum NotificationChannel {
+  EMAIL
+  SMS
+  PUSH
+  IN_APP
+}
